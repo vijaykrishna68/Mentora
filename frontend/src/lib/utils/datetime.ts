@@ -19,6 +19,43 @@ export function getBrowserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
+// A small, curated fallback for the rare runtime without Intl.supportedValuesOf
+// (e.g. an older browser) — not exhaustive, just enough to unblock timezone
+// selection. getSupportedTimezones() below prefers the full live list.
+const FALLBACK_TIMEZONES = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Singapore",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+/**
+ * The full IANA timezone identifier list for a picker — never a hardcoded
+ * assumption like IST, and never a claim that the browser's own timezone is
+ * the mentor's scheduling timezone (this just lists every valid choice).
+ */
+export function getSupportedTimezones(): string[] {
+  if (typeof Intl.supportedValuesOf === "function") {
+    return Intl.supportedValuesOf("timeZone");
+  }
+  return FALLBACK_TIMEZONES;
+}
+
 export function formatTime(isoUtc: string, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, {
     timeZone,

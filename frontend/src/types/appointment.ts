@@ -81,3 +81,9 @@ export interface MentorAppointmentListItem {
   review: AppointmentReview | null;
   createdAt: string;
 }
+
+/** GET /api/mentor/appointments response (mentor-appointments.service.ts `listMentorAppointments`). */
+export interface MentorAppointmentsResponse {
+  upcoming: MentorAppointmentListItem[];
+  past: MentorAppointmentListItem[];
+}

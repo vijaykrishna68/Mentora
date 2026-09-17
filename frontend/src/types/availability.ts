@@ -1,4 +1,5 @@
 import type { AvailabilityCategory, DayOfWeek } from "./enums";
+import type { MentorReadiness } from "./mentor";
 
 /** A mentor's recurring weekly rule (managed by the mentor, not derived). */
 export interface AvailabilityRule {
@@ -26,4 +27,28 @@ export interface PublicAvailabilityResponse {
   date: string;
   timezone: string | null;
   slots: AvailabilitySlot[];
+}
+
+/** POST /api/mentor/availability request body (mentor-availability.schema.ts `createAvailabilityRuleSchema`). */
+export interface CreateAvailabilityRuleInput {
+  dayOfWeek: DayOfWeek;
+  /** 24-hour "HH:mm", e.g. "09:00". */
+  startTime: string;
+  endTime: string;
+  bufferMinutes?: number;
+  isActive?: boolean;
+}
+
+/** PATCH /api/mentor/availability/:id request body — every field optional. */
+export type UpdateAvailabilityRuleInput = Partial<CreateAvailabilityRuleInput>;
+
+/** POST/PATCH /api/mentor/availability(/:id) response. */
+export interface AvailabilityRuleMutationResponse {
+  rule: AvailabilityRule;
+  readiness: MentorReadiness;
+}
+
+/** DELETE /api/mentor/availability/:id response. */
+export interface DeleteAvailabilityRuleResponse {
+  readiness: MentorReadiness;
 }

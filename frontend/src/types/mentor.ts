@@ -40,6 +40,69 @@ export interface PrivateMentorProfile {
   updatedAt: string;
 }
 
+/**
+ * mentor.readiness.ts `MentorReadiness` — the single source of truth for
+ * onboarding progress and bookability. Never recomputed on the frontend;
+ * always the backend's own values.
+ */
+export interface MentorReadiness {
+  hasRequiredProfileInfo: boolean;
+  hasTimezone: boolean;
+  hasActiveOffering: boolean;
+  hasActiveAvailabilityRule: boolean;
+  acceptingBookings: boolean;
+  readyExcludingAcceptingBookings: boolean;
+  isBookable: boolean;
+  reasons: string[];
+}
+
+/** GET /api/mentor/profile response. */
+export interface GetMyMentorProfileResponse {
+  profile: PrivateMentorProfile;
+  readiness: MentorReadiness;
+  experienceEntries: ExperienceEntry[];
+}
+
+/** PATCH /api/mentor/profile response. */
+export interface UpdateMentorProfileResponse {
+  profile: PrivateMentorProfile;
+  readiness: MentorReadiness;
+}
+
+/**
+ * PATCH /api/mentor/profile request body (mentor-profile.schema.ts
+ * `updateMentorProfileSchema`) — every field optional, onboarding is
+ * progressively completable. `.strict()` on the backend rejects anything
+ * else, notably a client-supplied `onboardingComplete`.
+ */
+export interface UpdateMentorProfileInput {
+  headline?: string | null;
+  bio?: string | null;
+  country?: string | null;
+  timezone?: string | null;
+  phone?: string | null;
+  yearsExperience?: number | null;
+  primaryCategory?: Category | null;
+  tags?: string[];
+  connectionModes?: ConnectionMode[];
+  avatarUrl?: string | null;
+  acceptingBookings?: boolean;
+}
+
+/** POST /api/mentor/experience request body (mentor-experience.schema.ts `createExperienceSchema`). */
+export interface CreateExperienceInput {
+  organization: string;
+  role: string;
+  /** Plain date, e.g. "2024-01-15". */
+  startDate: string;
+  endDate?: string | null;
+  description?: string | null;
+  order?: number;
+}
+
+/** PATCH /api/mentor/experience/:id request body — every field optional. */
+export type UpdateExperienceInput = Partial<CreateExperienceInput>;
+
 export interface MentorPublicStats {
   averageRating: number | null;
   reviewCount: number;

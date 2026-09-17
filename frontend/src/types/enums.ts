@@ -63,3 +63,19 @@ export const CONNECTION_MODE_LABELS: Record<ConnectionMode, string> = {
   PHONE: "Phone",
   IN_PERSON: "In person",
 };
+
+export const AVAILABILITY_CATEGORY_LABELS: Record<AvailabilityCategory, string> = {
+  MORNING: "Morning",
+  AFTERNOON: "Afternoon",
+  EVENING: "Evening",
+};
+
+export const DAY_OF_WEEK_LABELS: Record<DayOfWeek, string> = {
+  MONDAY: "Monday",
+  TUESDAY: "Tuesday",
+  WEDNESDAY: "Wednesday",
+  THURSDAY: "Thursday",
+  FRIDAY: "Friday",
+  SATURDAY: "Saturday",
+  SUNDAY: "Sunday",
+};
