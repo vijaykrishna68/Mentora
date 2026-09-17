@@ -1,3 +1,4 @@
+import bcrypt from "bcrypt";
 import { Temporal } from "@js-temporal/polyfill";
 import {
   PrismaClient,
@@ -10,6 +11,12 @@ import {
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+// Every seeded account shares this password so a reviewer can log in as any
+// demo user — see README.md "Demo Accounts". Hashed with the same cost
+// factor auth.service.ts uses (BCRYPT_ROUNDS = 12), never stored in plaintext.
+const DEMO_PASSWORD = "MentoraDemo123!";
+const BCRYPT_ROUNDS = 12;
 
 // --- Timezone-aware helpers ---------------------------------------------
 // Appointment instants are computed by interpreting a local wall-clock time
@@ -63,6 +70,8 @@ function pastDateOnWeekday(isoDow: number, minDaysAgo: number): Temporal.PlainDa
 }
 
 async function main() {
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, BCRYPT_ROUNDS);
+
   // Clean slate — dev seed only, safe to rerun.
   await prisma.review.deleteMany();
   await prisma.appointment.deleteMany();
@@ -77,7 +86,7 @@ async function main() {
   const priyaUser = await prisma.user.create({
     data: {
       email: "priya.sharma@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.MENTOR,
       name: "Priya Sharma",
     },
@@ -136,6 +145,9 @@ async function main() {
       durationMinutes: 45,
       price: 400,
       currency: "INR",
+      // Subset of priya.connectionModes above — every offering must support
+      // at least one mode the mentor themselves supports.
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
       availabilityCategories: [AvailabilityCategory.EVENING],
     },
   });
@@ -148,6 +160,7 @@ async function main() {
       durationMinutes: 60,
       price: 600,
       currency: "INR",
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
       availabilityCategories: [AvailabilityCategory.EVENING],
     },
   });
@@ -166,7 +179,7 @@ async function main() {
   const jamesUser = await prisma.user.create({
     data: {
       email: "james.carter@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.MENTOR,
       name: "James Carter",
     },
@@ -212,6 +225,8 @@ async function main() {
       durationMinutes: 30,
       price: 40,
       currency: "USD",
+      // Subset of james.connectionModes above.
+      connectionModes: [ConnectionMode.ZOOM, ConnectionMode.PHONE],
       availabilityCategories: [AvailabilityCategory.MORNING],
     },
   });
@@ -224,6 +239,7 @@ async function main() {
       durationMinutes: 60,
       price: 90,
       currency: "USD",
+      connectionModes: [ConnectionMode.ZOOM, ConnectionMode.PHONE],
       availabilityCategories: [AvailabilityCategory.MORNING],
     },
   });
@@ -240,7 +256,7 @@ async function main() {
   const aikoUser = await prisma.user.create({
     data: {
       email: "aiko.tanaka@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.MENTOR,
       name: "Aiko Tanaka",
     },
@@ -272,6 +288,8 @@ async function main() {
       durationMinutes: 45,
       price: 5000,
       currency: "JPY",
+      // Matches aiko.connectionModes above.
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.IN_PERSON],
       availabilityCategories: [AvailabilityCategory.MORNING],
     },
   });
@@ -288,7 +306,7 @@ async function main() {
   const diegoUser = await prisma.user.create({
     data: {
       email: "diego.fernandez@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.MENTOR,
       name: "Diego Fernandez",
     },
@@ -318,6 +336,8 @@ async function main() {
       durationMinutes: 45,
       price: 35,
       currency: "EUR",
+      // Matches diego.connectionModes above.
+      connectionModes: [ConnectionMode.GOOGLE_MEET],
       availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.AFTERNOON, AvailabilityCategory.EVENING],
     },
   });
@@ -329,7 +349,7 @@ async function main() {
   const ananya = await prisma.user.create({
     data: {
       email: "ananya.verma@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.CUSTOMER,
       name: "Ananya Verma",
       interests: [Category.CAREER_GROWTH, Category.SYSTEM_DESIGN],
@@ -338,7 +358,7 @@ async function main() {
   const michael = await prisma.user.create({
     data: {
       email: "michael.chen@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.CUSTOMER,
       name: "Michael Chen",
       interests: [Category.INTERVIEW_PREPARATION, Category.LEADERSHIP],
@@ -347,7 +367,7 @@ async function main() {
   const sara = await prisma.user.create({
     data: {
       email: "sara.ahmed@mentora.dev",
-      passwordHash: "$2b$12$devSeedPasswordHashPlaceholder00000000000000000000000",
+      passwordHash,
       role: Role.CUSTOMER,
       name: "Sara Ahmed",
       // Skipped the optional interests step during onboarding.
