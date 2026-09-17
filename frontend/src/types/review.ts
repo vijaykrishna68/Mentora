@@ -14,3 +14,13 @@ export interface AppointmentReview {
   comment: string | null;
   createdAt: string;
 }
+
+/**
+ * POST /api/appointments/:id/review request body (review.schema.ts
+ * `createReviewSchema`, `.strict()`). appointmentId/customerId are derived
+ * server-side from the URL param and the authenticated user.
+ */
+export interface CreateReviewInput {
+  rating: number;
+  comment?: string | null;
+}

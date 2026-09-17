@@ -57,6 +57,12 @@ export interface CustomerAppointmentListItem {
   createdAt: string;
 }
 
+/** GET /api/appointments response (appointment.service.ts `listMyAppointments`). */
+export interface CustomerAppointmentsResponse {
+  upcoming: CustomerAppointmentListItem[];
+  past: CustomerAppointmentListItem[];
+}
+
 /** GET /api/mentor/appointments list item (mentor's own view — customer identity attached). */
 export interface MentorAppointmentListItem {
   id: string;

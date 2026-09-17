@@ -51,6 +51,12 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   ENTREPRENEURSHIP: "Entrepreneurship",
 };
 
+export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
+  CONFIRMED: "Upcoming",
+  CANCELLED: "Cancelled",
+  COMPLETED: "Completed",
+};
+
 export const CONNECTION_MODE_LABELS: Record<ConnectionMode, string> = {
   GOOGLE_MEET: "Google Meet",
   ZOOM: "Zoom",

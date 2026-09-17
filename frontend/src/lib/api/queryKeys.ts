@@ -14,6 +14,9 @@ export const queryKeys = {
   mentorProfile: {
     detail: (mentorId: string) => ["mentor-profile", mentorId] as const,
   },
+  appointments: {
+    list: ["appointments", "list"] as const,
+  },
   availability: {
     // A stable, explicit key per (mentor, offering, date) — invalidated after a
     // successful booking or a 409 conflict so stale slots can never be reused.
