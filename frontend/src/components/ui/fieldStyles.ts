@@ -1,0 +1,2 @@
+export const fieldControlClass =
+  "w-full rounded-sm border-[length:var(--b-def)] border-line bg-ivory-raised px-[13px] py-[11px] text-sm text-charcoal placeholder:text-charcoal-faint transition-[border-color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-editorial)] focus:border-pine focus:shadow-[var(--focus-ring)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-error";
