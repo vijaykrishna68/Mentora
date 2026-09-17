@@ -1,0 +1,42 @@
+The brief · from Disha :
+We are looking for curious minds who enjoy building things and thinking beyond the obvious. Your goal is to deliver a production ready app.
+
+Build a small Appointment Booking application where a user can:
+
+- View available appointment slots
+- Select and book a slot
+- View their upcoming/past appointments
+- Cancel an appointment
+
+The application should include a polished frontend (1-2 screens are sufficient), backend APIs and a database. You are free to choose the technology stack, architecture and approach. You may use AI tools during development.
+
+
+
+we are evaluating much more than whether the application works.
+
+1. Product & UX
+- Intuitive and frictionless user experience
+- Thoughtful information hierarchy
+- Excellent UI/UX and visual polish
+- Responsive design
+- Loading, empty, error and success states
+- Clear feedback for user actions
+- Attention to small details and overall product quality
+
+The final experience should feel like something you would be comfortable shipping to real users.
+
+2. Engineering
+- Clean, maintainable and well-structured code
+- Good API and data-model design
+- Proper validation and error handling
+- Reliability and data consistency
+- Handling of concurrent booking attempts
+- Appropriate authentication/authorization
+- Meaningful automated tests
+
+3. Product thinking
+The requirements are intentionally kept simple and do not specify every scenario. You do not need to build a large application. Keep the scope small, but make the quality high. We are particularly interested in seeing whether you can take a simple requirement and turn it into something that feels thought-through, polished and production-ready.
+
+If you need guidance or have questions, feel free to message me at 8056039074 — or ask on this page and I will answer.
+
+

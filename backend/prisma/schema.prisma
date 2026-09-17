@@ -1,0 +1,298 @@
+// Mentora — Phase 1: Database Foundation
+// Domain model derived from 01-product-definition.md, 03a-booking-consistency.md,
+// and 03b-data-api-architecture.md (authoritative backend technical spec).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [btree_gist]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  CUSTOMER
+  MENTOR
+}
+
+// Persisted appointment lifecycle only. COMPLETED is an effective, derived
+// status (CONFIRMED + endAtUTC in the past) computed at read time — never
+// persisted and never written by a background process.
+enum AppointmentStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum ConnectionMode {
+  GOOGLE_MEET
+  ZOOM
+  PHONE
+  IN_PERSON
+}
+
+// Time-of-day availability category. Derived from an AvailabilityRule's
+// mentor-local start time (see AvailabilityRule) — never a topic/subject.
+enum AvailabilityCategory {
+  MORNING
+  AFTERNOON
+  EVENING
+}
+
+// Mentoring/topic taxonomy used for customer interests and offering
+// categorization. Distinct from AvailabilityCategory (time-of-day).
+enum Category {
+  CAREER_GROWTH
+  INTERVIEW_PREPARATION
+  LEADERSHIP
+  FRONTEND
+  BACKEND
+  SYSTEM_DESIGN
+  ENTREPRENEURSHIP
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  role         Role
+  name         String
+
+  // Customer-only: topics selected during onboarding (01-product-definition.md §5).
+  // Optional and skippable, so it may be empty.
+  interests Category[]
+
+  mentorProfile MentorProfile?
+  appointments  Appointment[]
+  reviews       Review[]
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// Phase 2: independently revocable refresh-token sessions. The raw token is
+// never persisted — only a SHA-256 hash, so a database leak doesn't expose
+// usable tokens. revokedAt (rather than deletion) lets refresh() detect reuse
+// of an already-rotated token, which is a signal of token theft.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz
+  revokedAt DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model MentorProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  headline         String?
+  bio              String?
+  country          String? // ISO 3166-1 alpha-2, e.g. "IN", "US"
+  // IANA timezone, e.g. "Asia/Kolkata" — authoritative for availability
+  // interpretation. Nullable: unknown until the mentor completes onboarding.
+  timezone         String?
+  yearsExperience  Int?
+  primaryCategory  Category?
+  tags             String[]
+  connectionModes  ConnectionMode[]
+  // Phase 3: supports the PHONE connection mode without building telephony —
+  // just a contact number the mentor shares for phone sessions.
+  phone            String?
+  avatarUrl        String?
+  faq              Json? // [{ question: string, answer: string }, ...]
+
+  // Global booking toggle (01-product-definition.md §15/§16, 03b §46).
+  acceptingBookings Boolean @default(true)
+
+  // Phase 4 booking constraints. v1 defaults: require at least 1 hour of
+  // notice, and don't expose bookable slots more than 30 days out. Mentor-
+  // configurable via PATCH /api/mentor/profile.
+  minimumNoticeMinutes Int @default(60)
+  maximumAdvanceDays   Int @default(30)
+
+  // Phase 2: set explicitly by a future onboarding-completion step (not this
+  // phase). A freshly registered mentor starts false and must stay excluded
+  // from discovery/booking until later phases flip it.
+  onboardingComplete Boolean @default(false)
+
+  experienceEntries ExperienceEntry[]
+  offerings         Offering[]
+  availabilityRules AvailabilityRule[]
+  appointments      Appointment[]
+  reviews           Review[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("mentor_profiles")
+}
+
+model ExperienceEntry {
+  id              String        @id @default(uuid()) @db.Uuid
+  mentorProfileId String        @db.Uuid
+  mentorProfile   MentorProfile @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
+
+  organization String
+  role         String
+  startDate    DateTime  @db.Date
+  endDate      DateTime? @db.Date // null = present
+  description  String?
+  // Manual display order within a mentor's timeline (ascending). Auto-assigned
+  // on create if omitted; the service never reorders siblings automatically.
+  order        Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mentorProfileId])
+  @@map("experience_entries")
+}
+
+model Offering {
+  id              String        @id @default(uuid()) @db.Uuid
+  mentorProfileId String        @db.Uuid
+  mentorProfile   MentorProfile @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
+
+  name            String
+  category        Category // mentoring/topic category
+  description     String?
+  durationMinutes Int // authoritative session duration
+  price           Decimal @db.Decimal(10, 2)
+  currency        String  @default("INR")
+  isActive        Boolean @default(true)
+
+  // This offering's own supported connection modes — a mentor's individual
+  // offerings can support a subset of MentorProfile.connectionModes (that
+  // field is the mentor's general capability list for profile display).
+  connectionModes ConnectionMode[]
+
+  // Which time-of-day availability windows this offering can be booked into.
+  // A generated slot's category comes from its AvailabilityRule's derived
+  // category (see AvailabilityRule) and must appear in this list.
+  availabilityCategories AvailabilityCategory[]
+
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mentorProfileId])
+  @@map("offerings")
+}
+
+// v1 scope: recurring weekly rules only. Specific-date/time blocking, holiday
+// exceptions, and custom recurrence are explicitly out of scope for v1 and
+// are a candidate future improvement, not modeled here.
+model AvailabilityRule {
+  id              String        @id @default(uuid()) @db.Uuid
+  mentorProfileId String        @db.Uuid
+  mentorProfile   MentorProfile @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
+
+  dayOfWeek DayOfWeek
+  startTime DateTime @db.Time // wall-clock local time, interpreted in mentorProfile.timezone
+  endTime   DateTime @db.Time
+
+  // Approved decision: buffer is mentor-level (per rule), not per-offering.
+  bufferMinutes Int @default(0)
+
+  // Soft-disable without losing the configured window (e.g. temporary pause).
+  // A real DELETE removes the row entirely — there's no historical dependency
+  // on availability rules the way there is on offerings.
+  isActive Boolean @default(true)
+
+  // No stored AvailabilityCategory here: a rule's category (Morning/Afternoon/
+  // Evening) is derived from startTime at read time, not persisted, and is
+  // matched against Offering.availabilityCategories during slot generation.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mentorProfileId, dayOfWeek])
+  @@map("availability_rules")
+}
+
+model Appointment {
+  id              String        @id @default(uuid()) @db.Uuid
+  customerId      String        @db.Uuid
+  customer        User          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  mentorProfileId String        @db.Uuid
+  mentorProfile   MentorProfile @relation(fields: [mentorProfileId], references: [id], onDelete: Restrict)
+  offeringId      String        @db.Uuid
+  offering        Offering      @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+
+  startAt DateTime @db.Timestamptz // UTC instant
+  endAt   DateTime @db.Timestamptz // UTC instant, derived from offering.durationMinutes at booking time
+
+  status         AppointmentStatus @default(CONFIRMED)
+  connectionMode ConnectionMode
+
+  // Snapshot of offering.{name, durationMinutes, price, currency} at booking
+  // time so historical appointments stay accurate if the offering changes later.
+  offeringSnapshot Json
+
+  // Phase 5: booking-time snapshots, immutable like offeringSnapshot above —
+  // if the mentor later changes timezone or phone number, this appointment
+  // must keep showing what the customer was told when they booked.
+  mentorTimezone   String // mentorProfile.timezone at the moment of booking
+  connectionDetail String? // mentor's phone number for PHONE; null for GOOGLE_MEET in v1
+
+  review Review?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mentorProfileId, startAt])
+  @@index([customerId, startAt])
+  @@index([offeringId])
+  @@map("appointments")
+}
+
+model Review {
+  id              String        @id @default(uuid()) @db.Uuid
+  appointmentId   String        @unique @db.Uuid
+  appointment     Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  customerId      String        @db.Uuid
+  customer        User          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  mentorProfileId String        @db.Uuid
+  mentorProfile   MentorProfile @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
+
+  rating  Int
+  comment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mentorProfileId])
+  @@map("reviews")
+}
