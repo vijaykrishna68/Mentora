@@ -102,6 +102,7 @@ async function main() {
       primaryCategory: Category.CAREER_GROWTH,
       tags: ["Career Growth", "System Design", "Software Engineering"],
       connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+      avatarUrl: "https://mentora-gwai5o90d-vijaykrishna68s-projects.vercel.app/mentors/priya-sharma.jpg",
       faq: [
         {
           question: "What can we discuss during this session?",
@@ -196,6 +197,7 @@ async function main() {
       primaryCategory: Category.LEADERSHIP,
       tags: ["Leadership", "Interview Preparation"],
       connectionModes: [ConnectionMode.ZOOM, ConnectionMode.PHONE],
+      avatarUrl: "https://mentora-gwai5o90d-vijaykrishna68s-projects.vercel.app/mentors/james-carter.jpg",
       faq: [
         {
           question: "Who is this session suitable for?",
