@@ -1,32 +1,37 @@
-# React + TypeScript + Vite
+# Mentora — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript single-page app built with Vite. See the [root README](../README.md)
+for the product overview, architecture and deployment.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start the dev server on `http://localhost:5173` |
+| `npm run build` | Typecheck (`tsc -b`) and produce the production build in `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run lint` | Lint with Oxlint |
+| `npx vitest run` | Run the test suite (Vitest, Testing Library, jsdom) |
 
-## React Compiler
+## Environment
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Copy `.env.example` to `.env.development` and set:
 
-## Expanding the Oxlint configuration
+| Variable | Purpose |
+|---|---|
+| `VITE_API_URL` | API base URL, e.g. `http://localhost:5000/api` (embedded at build time) |
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## Layout
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
 ```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+src/
+  app/            providers, router, route guards, centralized paths
+  components/     ui/ (design-system primitives) and layout/ (customer + mentor shells)
+  features/       one folder per feature: api.ts, query hooks, components, tests
+  lib/api/        API client (envelope unwrapping, refresh-and-retry), errors, query keys
+  lib/stores/     toast store (the only Zustand store)
+  styles/         design tokens (Tailwind theme)
+  types/          API response types
+public/mentors/   mentor portraits (static, served from the site root)
+vercel.json       rewrites all paths to index.html for client-side routing
+```

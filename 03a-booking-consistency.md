@@ -1,3 +1,5 @@
+> **Historical planning document.** Written before implementation and kept for context and design rationale. It is not kept in sync with the code: where it differs from the implementation, the code and the [README](README.md) are authoritative.
+
 # Mentora — Phase 3A
 # Booking Consistency & Scheduling Architecture
 

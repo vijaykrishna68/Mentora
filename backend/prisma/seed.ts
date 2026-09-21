@@ -8,9 +8,18 @@ import {
   AvailabilityCategory,
   Category,
   DayOfWeek,
+  type MentorProfile,
+  type Offering,
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+// Portraits are static files in frontend/public/mentors/, served by the
+// Vercel frontend. MentorProfile.avatarUrl is validated as an absolute URL
+// (mentor-profile.schema.ts), so the stable production origin is used here.
+// Mentors without a portrait leave avatarUrl null and the UI falls back to
+// an initials avatar.
+const PORTRAIT_BASE_URL = "https://mentora-two-ruddy.vercel.app/mentors";
 
 // Every seeded account shares this password so a reviewer can log in as any
 // demo user — see README.md "Demo Accounts". Hashed with the same cost
@@ -69,6 +78,149 @@ function pastDateOnWeekday(isoDow: number, minDaysAgo: number): Temporal.PlainDa
   return date;
 }
 
+// --- Data-driven helpers for the additional marketplace mentors -------------
+
+interface MentorSpec {
+  email: string;
+  name: string;
+  headline: string;
+  bio: string;
+  country: string;
+  timezone: string;
+  phone?: string;
+  yearsExperience: number;
+  primaryCategory: Category;
+  tags: string[];
+  connectionModes: ConnectionMode[];
+  faq: { question: string; answer: string }[];
+  experience: { role: string; organization: string; startDate: string; endDate?: string; description: string }[];
+  // Each offering's connectionModes must be a subset of the mentor's own.
+  offerings: {
+    key: string;
+    name: string;
+    category: Category;
+    description: string;
+    durationMinutes: number;
+    price: number;
+    currency: string;
+    connectionModes: ConnectionMode[];
+    availabilityCategories: AvailabilityCategory[];
+  }[];
+  availability: { days: DayOfWeek[]; start: [number, number]; end: [number, number]; bufferMinutes: number }[];
+}
+
+// Creates a fully onboarded, discoverable mentor (readiness: headline, bio,
+// timezone, active offering, active availability rule, accepting bookings).
+async function createMentor(spec: MentorSpec, passwordHash: string) {
+  const user = await prisma.user.create({
+    data: { email: spec.email, passwordHash, role: Role.MENTOR, name: spec.name },
+  });
+  const profile = await prisma.mentorProfile.create({
+    data: {
+      userId: user.id,
+      headline: spec.headline,
+      bio: spec.bio,
+      country: spec.country,
+      timezone: spec.timezone,
+      phone: spec.phone,
+      yearsExperience: spec.yearsExperience,
+      primaryCategory: spec.primaryCategory,
+      tags: spec.tags,
+      connectionModes: spec.connectionModes,
+      faq: spec.faq,
+      acceptingBookings: true,
+      onboardingComplete: true,
+    },
+  });
+  await prisma.experienceEntry.createMany({
+    data: spec.experience.map((entry, order) => ({
+      mentorProfileId: profile.id,
+      role: entry.role,
+      organization: entry.organization,
+      startDate: new Date(entry.startDate),
+      endDate: entry.endDate ? new Date(entry.endDate) : null,
+      description: entry.description,
+      order,
+    })),
+  });
+
+  const offerings: Record<string, Offering> = {};
+  for (const offering of spec.offerings) {
+    offerings[offering.key] = await prisma.offering.create({
+      data: {
+        mentorProfileId: profile.id,
+        name: offering.name,
+        category: offering.category,
+        description: offering.description,
+        durationMinutes: offering.durationMinutes,
+        price: offering.price,
+        currency: offering.currency,
+        connectionModes: offering.connectionModes,
+        availabilityCategories: offering.availabilityCategories,
+      },
+    });
+  }
+
+  await prisma.availabilityRule.createMany({
+    data: spec.availability.flatMap((window) =>
+      window.days.map((dayOfWeek) => ({
+        mentorProfileId: profile.id,
+        dayOfWeek,
+        startTime: timeOfDay(window.start[0], window.start[1]),
+        endTime: timeOfDay(window.end[0], window.end[1]),
+        bufferMinutes: window.bufferMinutes,
+      })),
+    ),
+  });
+
+  return { profile, offerings };
+}
+
+// A CONFIRMED appointment (past => effectively COMPLETED) with the same
+// snapshot shape the booking service writes, plus an optional review.
+async function seedSession(args: {
+  customerId: string;
+  mentor: MentorProfile;
+  offering: Offering;
+  date: Temporal.PlainDate;
+  startTime: string; // "HH:mm" wall-clock in the mentor's timezone
+  connectionMode: ConnectionMode;
+  review?: { rating: number; comment: string };
+}) {
+  const start = Temporal.PlainTime.from(args.startTime);
+  const end = start.add({ minutes: args.offering.durationMinutes });
+  const appointment = await prisma.appointment.create({
+    data: {
+      customerId: args.customerId,
+      mentorProfileId: args.mentor.id,
+      offeringId: args.offering.id,
+      startAt: localToUtcDate(args.mentor.timezone, args.date, start),
+      endAt: localToUtcDate(args.mentor.timezone, args.date, end),
+      status: AppointmentStatus.CONFIRMED,
+      connectionMode: args.connectionMode,
+      mentorTimezone: args.mentor.timezone!,
+      connectionDetail: args.connectionMode === ConnectionMode.PHONE ? args.mentor.phone : null,
+      offeringSnapshot: {
+        name: args.offering.name,
+        durationMinutes: args.offering.durationMinutes,
+        price: Number(args.offering.price),
+        currency: args.offering.currency,
+      },
+    },
+  });
+  if (args.review) {
+    await prisma.review.create({
+      data: {
+        appointmentId: appointment.id,
+        customerId: args.customerId,
+        mentorProfileId: args.mentor.id,
+        rating: args.review.rating,
+        comment: args.review.comment,
+      },
+    });
+  }
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, BCRYPT_ROUNDS);
 
@@ -102,7 +254,7 @@ async function main() {
       primaryCategory: Category.CAREER_GROWTH,
       tags: ["Career Growth", "System Design", "Software Engineering"],
       connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
-      avatarUrl: "https://mentora-gwai5o90d-vijaykrishna68s-projects.vercel.app/mentors/priya-sharma.jpg",
+      avatarUrl: `${PORTRAIT_BASE_URL}/priya-sharma.jpg`,
       faq: [
         {
           question: "What can we discuss during this session?",
@@ -197,7 +349,7 @@ async function main() {
       primaryCategory: Category.LEADERSHIP,
       tags: ["Leadership", "Interview Preparation"],
       connectionModes: [ConnectionMode.ZOOM, ConnectionMode.PHONE],
-      avatarUrl: "https://mentora-gwai5o90d-vijaykrishna68s-projects.vercel.app/mentors/james-carter.jpg",
+      avatarUrl: `${PORTRAIT_BASE_URL}/james-carter.jpg`,
       faq: [
         {
           question: "Who is this session suitable for?",
@@ -345,6 +497,462 @@ async function main() {
   });
   // Intentionally no availability rules and no appointments for Diego —
   // covers "mentor with no availability" / "mentor with no appointments".
+
+  // --- Additional marketplace mentors ---------------------------------------
+  // Six fully onboarded, discoverable mentors so Discover reads like a real
+  // directory: one per remaining primary category, across different
+  // countries/timezones, price points, durations and connection modes.
+  // Portraits are intentionally omitted (avatarUrl stays null → initials).
+
+  const { profile: sofia, offerings: sofiaOfferings } = await createMentor(
+    {
+      email: "sofia.almeida@mentora.dev",
+      name: "Sofia Almeida",
+      headline: "Staff Frontend Engineer",
+      bio: "Nine years building design systems and large React applications, most recently leading a web platform team at a European fintech. I mentor engineers on component architecture, web performance and growing into staff-level scope.",
+      country: "PT",
+      timezone: "Europe/Lisbon",
+      yearsExperience: 9,
+      primaryCategory: Category.FRONTEND,
+      tags: ["React", "TypeScript", "Design Systems", "Web Performance"],
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+      faq: [
+        {
+          question: "Can I bring my own codebase?",
+          answer: "Yes — share a repo or a few key components beforehand and we'll review them together.",
+        },
+        {
+          question: "Do you cover testing and performance?",
+          answer: "Both. Most sessions include a look at rendering performance and a pragmatic testing strategy.",
+        },
+      ],
+      experience: [
+        {
+          role: "Staff Frontend Engineer",
+          organization: "Meridian Pay",
+          startDate: "2022-03-01",
+          description: "Lead the web platform team and the design system used across 14 product squads.",
+        },
+        {
+          role: "Senior Frontend Engineer",
+          organization: "Atlas Commerce",
+          startDate: "2019-02-01",
+          endDate: "2022-02-28",
+          description: "Rebuilt the storefront in React and TypeScript, cutting largest contentful paint by 40%.",
+        },
+        {
+          role: "Frontend Developer",
+          organization: "Fieldnote Studio",
+          startDate: "2017-01-01",
+          endDate: "2019-01-31",
+          description: "Shipped client web apps for media and nonprofit organisations.",
+        },
+      ],
+      offerings: [
+        {
+          key: "react",
+          name: "React Architecture Review",
+          category: Category.FRONTEND,
+          description: "Review your component structure, state management and performance hot spots, with a concrete refactoring plan.",
+          durationMinutes: 60,
+          price: 60,
+          currency: "EUR",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.AFTERNOON],
+        },
+        {
+          key: "roadmap",
+          name: "Frontend Career Roadmap",
+          category: Category.CAREER_GROWTH,
+          description: "Map the skills and scope you need for your next level — senior, staff or tech lead.",
+          durationMinutes: 45,
+          price: 45,
+          currency: "EUR",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.AFTERNOON],
+        },
+      ],
+      availability: [
+        { days: [DayOfWeek.TUESDAY], start: [14, 0], end: [18, 0], bufferMinutes: 15 },
+        { days: [DayOfWeek.THURSDAY], start: [9, 0], end: [13, 0], bufferMinutes: 15 },
+      ],
+    },
+    passwordHash,
+  );
+
+  const { profile: arjun, offerings: arjunOfferings } = await createMentor(
+    {
+      email: "arjun.nair@mentora.dev",
+      name: "Arjun Nair",
+      headline: "Principal Backend Engineer",
+      bio: "Thirteen years designing payments and ledger systems on PostgreSQL. I help backend engineers reason about data models, consistency and service boundaries — and prepare for principal-level design discussions.",
+      country: "SG",
+      timezone: "Asia/Singapore",
+      yearsExperience: 13,
+      primaryCategory: Category.BACKEND,
+      tags: ["Backend", "PostgreSQL", "Distributed Systems", "API Design"],
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+      faq: [
+        {
+          question: "Which stacks do you work with?",
+          answer: "Mostly Node.js, Go and Java services on PostgreSQL, but the principles carry across stacks.",
+        },
+      ],
+      experience: [
+        {
+          role: "Principal Backend Engineer",
+          organization: "Harbor Payments",
+          startDate: "2020-05-01",
+          description: "Own the ledger and settlement services that process millions of transactions a day.",
+        },
+        {
+          role: "Senior Backend Engineer",
+          organization: "Kestrel Logistics",
+          startDate: "2016-08-01",
+          endDate: "2020-04-30",
+          description: "Designed event-driven order tracking on PostgreSQL and Kafka.",
+        },
+        {
+          role: "Software Engineer",
+          organization: "Tidewater Systems",
+          startDate: "2013-07-01",
+          endDate: "2016-07-31",
+          description: "Built internal APIs and batch pipelines for a logistics platform.",
+        },
+      ],
+      offerings: [
+        {
+          key: "architecture",
+          name: "Backend Architecture Session",
+          category: Category.BACKEND,
+          description: "Walk through your service boundaries, data model and failure modes and leave with a prioritised list of changes.",
+          durationMinutes: 60,
+          price: 85,
+          currency: "SGD",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.EVENING],
+        },
+        {
+          key: "database",
+          name: "Database & API Design Review",
+          category: Category.BACKEND,
+          description: "A focused review of your schema, indexing and API contracts.",
+          durationMinutes: 45,
+          price: 65,
+          currency: "SGD",
+          connectionModes: [ConnectionMode.GOOGLE_MEET],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.EVENING],
+        },
+      ],
+      availability: [
+        { days: [DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY], start: [18, 30], end: [21, 30], bufferMinutes: 15 },
+        { days: [DayOfWeek.SATURDAY], start: [9, 0], end: [12, 0], bufferMinutes: 10 },
+      ],
+    },
+    passwordHash,
+  );
+
+  const { profile: nadia, offerings: nadiaOfferings } = await createMentor(
+    {
+      email: "nadia.haddad@mentora.dev",
+      name: "Nadia Haddad",
+      headline: "Staff Engineer, Distributed Systems",
+      bio: "Eleven years building multi-region data platforms. I run realistic system design mock interviews and architecture reviews, and coach engineers on making trade-offs explicit.",
+      country: "CA",
+      timezone: "America/Toronto",
+      yearsExperience: 11,
+      primaryCategory: Category.SYSTEM_DESIGN,
+      tags: ["System Design", "Distributed Systems", "Scalability", "Staff+"],
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+      faq: [
+        {
+          question: "Do you run mock interviews?",
+          answer: "Yes. The deep dive is structured like a staff-level system design interview, followed by detailed feedback.",
+        },
+        {
+          question: "Can we review a real system instead?",
+          answer: "Absolutely — the scaling review is designed for your own architecture.",
+        },
+      ],
+      experience: [
+        {
+          role: "Staff Engineer, Distributed Systems",
+          organization: "Northgate Cloud",
+          startDate: "2021-09-01",
+          description: "Architect the multi-region data platform and mentor 20+ engineers on system design.",
+        },
+        {
+          role: "Senior Software Engineer",
+          organization: "Brightline Data",
+          startDate: "2018-01-01",
+          endDate: "2021-08-31",
+          description: "Led the redesign of a streaming ingestion pipeline handling billions of events a month.",
+        },
+        {
+          role: "Software Engineer",
+          organization: "Quill Analytics",
+          startDate: "2015-06-01",
+          endDate: "2017-12-31",
+          description: "Built reporting services and internal tooling for a B2B analytics product.",
+        },
+      ],
+      offerings: [
+        {
+          key: "deepDive",
+          name: "System Design Deep Dive",
+          category: Category.SYSTEM_DESIGN,
+          description: "A 90-minute mock system design interview followed by structured feedback on your approach.",
+          durationMinutes: 90,
+          price: 110,
+          currency: "CAD",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.EVENING],
+        },
+        {
+          key: "scaling",
+          name: "Scaling Review",
+          category: Category.SYSTEM_DESIGN,
+          description: "Bring a real system and its bottlenecks; leave with options and trade-offs.",
+          durationMinutes: 45,
+          price: 60,
+          currency: "CAD",
+          connectionModes: [ConnectionMode.ZOOM],
+          availabilityCategories: [
+            AvailabilityCategory.MORNING,
+            AvailabilityCategory.AFTERNOON,
+            AvailabilityCategory.EVENING,
+          ],
+        },
+      ],
+      availability: [
+        { days: [DayOfWeek.TUESDAY, DayOfWeek.THURSDAY], start: [17, 30], end: [21, 30], bufferMinutes: 15 },
+        { days: [DayOfWeek.SUNDAY], start: [10, 0], end: [13, 0], bufferMinutes: 15 },
+      ],
+    },
+    passwordHash,
+  );
+
+  const { profile: david, offerings: davidOfferings } = await createMentor(
+    {
+      email: "david.okafor@mentora.dev",
+      name: "David Okafor",
+      headline: "Senior Software Engineer & Interview Coach",
+      bio: "I've sat on a hiring committee and run over a hundred technical interviews. I run mock coding and behavioural interviews that feel like the real thing, with specific, kind feedback.",
+      country: "GB",
+      timezone: "Europe/London",
+      phone: "+44 20 7946 0958",
+      yearsExperience: 9,
+      primaryCategory: Category.INTERVIEW_PREPARATION,
+      tags: ["Interview Preparation", "Algorithms", "Behavioural Interviews", "Offer Strategy"],
+      connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET, ConnectionMode.PHONE],
+      faq: [
+        {
+          question: "Which language should I use in the mock interview?",
+          answer: "Whichever you'll use in your real interviews — I'm comfortable with Python, Java, TypeScript and Go.",
+        },
+      ],
+      experience: [
+        {
+          role: "Senior Software Engineer",
+          organization: "Ridgeway Software",
+          startDate: "2021-01-01",
+          description: "Interview 150+ candidates and sit on the engineering hiring committee.",
+        },
+        {
+          role: "Software Engineer",
+          organization: "Copperleaf Health",
+          startDate: "2017-09-01",
+          endDate: "2020-12-31",
+          description: "Built clinical scheduling services in Java and PostgreSQL.",
+        },
+      ],
+      offerings: [
+        {
+          key: "coding",
+          name: "Mock Coding Interview",
+          category: Category.INTERVIEW_PREPARATION,
+          description: "A timed coding interview with live feedback on problem solving, communication and code quality.",
+          durationMinutes: 60,
+          price: 65,
+          currency: "GBP",
+          connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.EVENING],
+        },
+        {
+          key: "behavioural",
+          name: "Behavioural Interview Prep",
+          category: Category.INTERVIEW_PREPARATION,
+          description: "Shape your stories, practise delivery and get feedback on how they land.",
+          durationMinutes: 45,
+          price: 45,
+          currency: "GBP",
+          connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET, ConnectionMode.PHONE],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.EVENING],
+        },
+      ],
+      availability: [
+        {
+          days: [DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY],
+          start: [18, 0],
+          end: [21, 0],
+          bufferMinutes: 10,
+        },
+        { days: [DayOfWeek.SATURDAY], start: [10, 0], end: [13, 0], bufferMinutes: 10 },
+      ],
+    },
+    passwordHash,
+  );
+
+  const { profile: camila, offerings: camilaOfferings } = await createMentor(
+    {
+      email: "camila.reyes@mentora.dev",
+      name: "Camila Reyes",
+      headline: "Founder & Product Lead",
+      bio: "Co-founded two B2B software companies, one of which was acquired. I work with first-time founders on validating ideas, finding early customers and deciding what not to build.",
+      country: "MX",
+      timezone: "America/Mexico_City",
+      phone: "+52 55 5555 0187",
+      yearsExperience: 10,
+      primaryCategory: Category.ENTREPRENEURSHIP,
+      tags: ["Entrepreneurship", "Startups", "Product Strategy", "Go-to-market"],
+      connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET, ConnectionMode.PHONE],
+      faq: [
+        {
+          question: "Do I need a finished idea?",
+          answer: "No. The validation workshop works from a rough idea and a list of assumptions.",
+        },
+      ],
+      experience: [
+        {
+          role: "Co-founder & Product Lead",
+          organization: "Sendero Labs",
+          startDate: "2022-04-01",
+          description: "Building logistics software for mid-sized distributors; seed-funded.",
+        },
+        {
+          role: "Co-founder & CEO",
+          organization: "Tiendita",
+          startDate: "2018-01-01",
+          endDate: "2021-12-31",
+          description: "Founded a small-business e-commerce platform, acquired in 2021.",
+        },
+        {
+          role: "Product Manager",
+          organization: "Orbita Digital",
+          startDate: "2016-05-01",
+          endDate: "2017-12-31",
+          description: "Owned onboarding and activation for a consumer subscription app.",
+        },
+      ],
+      offerings: [
+        {
+          key: "officeHours",
+          name: "Founder Office Hours",
+          category: Category.ENTREPRENEURSHIP,
+          description: "Bring your toughest founder question — pricing, first hires, fundraising or focus.",
+          durationMinutes: 45,
+          price: 70,
+          currency: "USD",
+          connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET, ConnectionMode.PHONE],
+          availabilityCategories: [AvailabilityCategory.MORNING, AvailabilityCategory.AFTERNOON],
+        },
+        {
+          key: "validation",
+          name: "Idea Validation Workshop",
+          category: Category.ENTREPRENEURSHIP,
+          description: "Stress-test your idea, define the riskiest assumptions and design the cheapest experiments.",
+          durationMinutes: 60,
+          price: 95,
+          currency: "USD",
+          connectionModes: [ConnectionMode.ZOOM, ConnectionMode.GOOGLE_MEET],
+          availabilityCategories: [AvailabilityCategory.AFTERNOON],
+        },
+      ],
+      availability: [
+        { days: [DayOfWeek.WEDNESDAY], start: [13, 0], end: [17, 0], bufferMinutes: 15 },
+        { days: [DayOfWeek.FRIDAY], start: [9, 0], end: [13, 0], bufferMinutes: 15 },
+      ],
+    },
+    passwordHash,
+  );
+
+  // Newly joined mentor: fully bookable, but no sessions or reviews yet — the
+  // "unrated" state in Discover.
+  await createMentor(
+    {
+      email: "amara.nwosu@mentora.dev",
+      name: "Amara Nwosu",
+      headline: "Engineering Manager & Career Coach",
+      bio: "I moved from individual contributor to engineering manager at two fast-growing fintechs. I help engineers plan promotions, switch companies and negotiate offers with confidence.",
+      country: "NG",
+      timezone: "Africa/Lagos",
+      yearsExperience: 10,
+      primaryCategory: Category.CAREER_GROWTH,
+      tags: ["Career Growth", "Promotion Strategy", "Salary Negotiation", "Engineering Management"],
+      connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+      faq: [
+        {
+          question: "Can you help me prepare for a promotion review?",
+          answer: "Yes — we'll map your impact to the level's expectations and plan how to present it.",
+        },
+      ],
+      experience: [
+        {
+          role: "Engineering Manager",
+          organization: "Savanna Fintech",
+          startDate: "2022-01-01",
+          description: "Manage two teams of eleven engineers and run the promotion and calibration process.",
+        },
+        {
+          role: "Senior Software Engineer",
+          organization: "Kora Mobile",
+          startDate: "2018-06-01",
+          endDate: "2021-12-31",
+          description: "Led the mobile payments SDK used by partner apps across West Africa.",
+        },
+        {
+          role: "Software Engineer",
+          organization: "Ibis Systems",
+          startDate: "2016-03-01",
+          endDate: "2018-05-31",
+          description: "Built back-office tooling for a regional bank.",
+        },
+      ],
+      offerings: [
+        {
+          key: "strategy",
+          name: "Career Strategy Session",
+          category: Category.CAREER_GROWTH,
+          description: "Clarify where you are, where you want to be in two years, and the next three moves.",
+          durationMinutes: 45,
+          price: 50,
+          currency: "USD",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.EVENING],
+        },
+        {
+          key: "negotiation",
+          name: "Offer Negotiation Coaching",
+          category: Category.CAREER_GROWTH,
+          description: "Plan and rehearse your negotiation before you respond to an offer.",
+          durationMinutes: 30,
+          price: 35,
+          currency: "USD",
+          connectionModes: [ConnectionMode.GOOGLE_MEET, ConnectionMode.ZOOM],
+          availabilityCategories: [AvailabilityCategory.EVENING],
+        },
+      ],
+      availability: [
+        {
+          days: [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY],
+          start: [17, 0],
+          end: [20, 0],
+          bufferMinutes: 10,
+        },
+      ],
+    },
+    passwordHash,
+  );
 
   // --- Customers -----------------------------------------------------------
 
@@ -508,10 +1116,217 @@ async function main() {
     },
   });
 
+  // --- Session history for the additional mentors ----------------------------
+  // Separate reviewer accounts are used so the original demo customers'
+  // appointment lists stay exactly as documented. All times are wall-clock in
+  // the mentor's own timezone and sit inside that mentor's availability windows.
+
+  const [rohan, emily, kwame, lucia] = await Promise.all(
+    [
+      { email: "rohan.iyer@mentora.dev", name: "Rohan Iyer", interests: [Category.FRONTEND, Category.CAREER_GROWTH] },
+      {
+        email: "emily.foster@mentora.dev",
+        name: "Emily Foster",
+        interests: [Category.INTERVIEW_PREPARATION, Category.SYSTEM_DESIGN],
+      },
+      { email: "kwame.boateng@mentora.dev", name: "Kwame Boateng", interests: [Category.BACKEND, Category.SYSTEM_DESIGN] },
+      {
+        email: "lucia.herrera@mentora.dev",
+        name: "Lucia Herrera",
+        interests: [Category.ENTREPRENEURSHIP, Category.LEADERSHIP],
+      },
+    ].map((customer) =>
+      prisma.user.create({ data: { ...customer, passwordHash, role: Role.CUSTOMER } }),
+    ),
+  );
+
+  // Sofia Almeida — 3 completed, 3 reviewed (avg 4.7) + 1 upcoming.
+  await seedSession({
+    customerId: rohan!.id,
+    mentor: sofia,
+    offering: sofiaOfferings.react!,
+    date: pastDateOnWeekday(2, 21),
+    startTime: "14:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: {
+      rating: 5,
+      comment: "Sofia untangled our component boundaries in one session and left me with a concrete refactoring plan.",
+    },
+  });
+  await seedSession({
+    customerId: emily!.id,
+    mentor: sofia,
+    offering: sofiaOfferings.react!,
+    date: pastDateOnWeekday(4, 12),
+    startTime: "09:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: { rating: 5, comment: "Clear, practical and very well prepared. The performance tips alone were worth it." },
+  });
+  await seedSession({
+    customerId: kwame!.id,
+    mentor: sofia,
+    offering: sofiaOfferings.roadmap!,
+    date: pastDateOnWeekday(2, 33),
+    startTime: "16:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: { rating: 4, comment: "A helpful roadmap toward staff scope. I'd have liked a few more concrete examples." },
+  });
+  await seedSession({
+    customerId: lucia!.id,
+    mentor: sofia,
+    offering: sofiaOfferings.react!,
+    date: nextDateOnWeekday(4, 6),
+    startTime: "10:00",
+    connectionMode: ConnectionMode.ZOOM,
+  });
+
+  // Arjun Nair — 2 completed, 2 reviewed (avg 4.5).
+  await seedSession({
+    customerId: kwame!.id,
+    mentor: arjun,
+    offering: arjunOfferings.architecture!,
+    date: pastDateOnWeekday(1, 15),
+    startTime: "18:30",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: {
+      rating: 5,
+      comment: "Arjun's breakdown of our event-sourcing trade-offs was the most useful hour I've had this quarter.",
+    },
+  });
+  await seedSession({
+    customerId: emily!.id,
+    mentor: arjun,
+    offering: arjunOfferings.database!,
+    date: pastDateOnWeekday(6, 20),
+    startTime: "09:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: { rating: 4, comment: "Solid review of my schema and indexing choices, with good follow-up reading." },
+  });
+
+  // Nadia Haddad — 4 completed, 3 reviewed (avg 5.0) + 1 upcoming.
+  await seedSession({
+    customerId: emily!.id,
+    mentor: nadia,
+    offering: nadiaOfferings.deepDive!,
+    date: pastDateOnWeekday(2, 9),
+    startTime: "17:30",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: {
+      rating: 5,
+      comment: "The most realistic system design mock I've done. Nadia pushed exactly where a staff interviewer would.",
+    },
+  });
+  await seedSession({
+    customerId: rohan!.id,
+    mentor: nadia,
+    offering: nadiaOfferings.deepDive!,
+    date: pastDateOnWeekday(4, 24),
+    startTime: "19:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: { rating: 5, comment: "Superb structure for thinking through trade-offs out loud." },
+  });
+  await seedSession({
+    customerId: kwame!.id,
+    mentor: nadia,
+    offering: nadiaOfferings.scaling!,
+    date: pastDateOnWeekday(7, 16),
+    startTime: "10:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: { rating: 5, comment: "A concise, incisive review of our queueing design." },
+  });
+  await seedSession({
+    customerId: lucia!.id,
+    mentor: nadia,
+    offering: nadiaOfferings.scaling!,
+    date: pastDateOnWeekday(2, 30),
+    startTime: "20:00",
+    connectionMode: ConnectionMode.ZOOM,
+  });
+  await seedSession({
+    customerId: emily!.id,
+    mentor: nadia,
+    offering: nadiaOfferings.scaling!,
+    date: nextDateOnWeekday(2, 8),
+    startTime: "18:00",
+    connectionMode: ConnectionMode.ZOOM,
+  });
+
+  // David Okafor — 5 completed, 4 reviewed (avg 4.5).
+  await seedSession({
+    customerId: rohan!.id,
+    mentor: david,
+    offering: davidOfferings.coding!,
+    date: pastDateOnWeekday(1, 8),
+    startTime: "18:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: {
+      rating: 5,
+      comment: "David's mock interview felt exactly like the real thing, and his feedback was specific and kind.",
+    },
+  });
+  await seedSession({
+    customerId: emily!.id,
+    mentor: david,
+    offering: davidOfferings.behavioural!,
+    date: pastDateOnWeekday(3, 20),
+    startTime: "19:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+    review: { rating: 4, comment: "Great structure for STAR answers. Helped me tighten my stories." },
+  });
+  await seedSession({
+    customerId: kwame!.id,
+    mentor: david,
+    offering: davidOfferings.coding!,
+    date: pastDateOnWeekday(6, 13),
+    startTime: "10:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: { rating: 5, comment: "Honest, actionable feedback on my problem-solving approach." },
+  });
+  await seedSession({
+    customerId: lucia!.id,
+    mentor: david,
+    offering: davidOfferings.behavioural!,
+    date: pastDateOnWeekday(4, 27),
+    startTime: "18:00",
+    connectionMode: ConnectionMode.PHONE,
+    review: { rating: 4, comment: "Really useful practice for senior-level questions." },
+  });
+  await seedSession({
+    customerId: rohan!.id,
+    mentor: david,
+    offering: davidOfferings.behavioural!,
+    date: pastDateOnWeekday(6, 34),
+    startTime: "11:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+  });
+
+  // Camila Reyes — 2 completed, 1 reviewed (4.0).
+  await seedSession({
+    customerId: lucia!.id,
+    mentor: camila,
+    offering: camilaOfferings.validation!,
+    date: pastDateOnWeekday(3, 18),
+    startTime: "14:00",
+    connectionMode: ConnectionMode.ZOOM,
+    review: {
+      rating: 4,
+      comment: "Camila challenged assumptions I hadn't noticed and gave me a clear validation plan.",
+    },
+  });
+  await seedSession({
+    customerId: rohan!.id,
+    mentor: camila,
+    offering: camilaOfferings.officeHours!,
+    date: pastDateOnWeekday(5, 26),
+    startTime: "10:00",
+    connectionMode: ConnectionMode.GOOGLE_MEET,
+  });
+
   console.log("Seed complete:");
-  console.log("  Mentors: Priya Sharma, James Carter, Aiko Tanaka (booking off), Diego Fernandez (no availability/appointments)");
-  console.log("  Customers: Ananya Verma, Michael Chen, Sara Ahmed (no interests)");
-  console.log("  Appointments: 2 upcoming, 2 past/completed (1 reviewed), 1 cancelled");
+  console.log("  Mentors (10): Priya Sharma, James Carter, Aiko Tanaka (booking off), Diego Fernandez (no availability/appointments),");
+  console.log("    Sofia Almeida, Arjun Nair, Nadia Haddad, David Okafor, Camila Reyes, Amara Nwosu (unrated)");
+  console.log("  Customers (7): Ananya Verma, Michael Chen, Sara Ahmed (no interests), Rohan Iyer, Emily Foster, Kwame Boateng, Lucia Herrera");
+  console.log("  Appointments: original 5 (2 upcoming, 2 past/completed (1 reviewed), 1 cancelled) + 18 for the additional mentors");
 }
 
 main()

@@ -1,3 +1,5 @@
+> **Historical checkpoint.** Written when the backend was frozen, before the frontend was built. The status, test count and "next phase" below are as of that moment; see the [README](README.md) for the current state of the project.
+
 # Mentora Backend Complete
 
 ## Status

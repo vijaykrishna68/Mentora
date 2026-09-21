@@ -1,3 +1,5 @@
+> **Historical document — initial product definition (V0.1).** Written before implementation and kept for context only. It is not the current product specification: see the [README](README.md), which describes what was built. In particular, the "Fluid Neo-Brutalism" design direction mentioned here was replaced by the Modern Botanical / editorial direction (see [design/README.md](design/README.md)).
+
 # Mentora — Product Definition
 
 **Version:** V0.1

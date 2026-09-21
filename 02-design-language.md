@@ -1,3 +1,5 @@
+> **Historical and superseded — this is NOT the implemented design.** This brief describes an early "fluid, restrained neo-brutalism" direction (strong borders, hard-edged contrast) that was not built. The shipped design is the **Modern Botanical / editorial** direction: warm ivory foundation, deep pine, one restrained terracotta accent, Ibarra Real Nova + Public Sans, soft warm-tinted shadows and no heavy borders. See [design/README.md](design/README.md), `design/mentora-editorial-direction.html` and `frontend/src/styles/tokens.css`. Interaction guidance below (timezone UX, booking flow, accessibility) may still be a useful reference, but the [README](README.md) and the code win on any difference.
+
 # Mentora — Design Language Brief
 
 ## Context
